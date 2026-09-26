@@ -25,5 +25,6 @@ test "$(sips -g pixelWidth "$SOURCE_ROOT/Resources/AppIcon.png" | awk '/pixelWid
 test "$(sips -g pixelHeight "$SOURCE_ROOT/Resources/AppIcon.png" | awk '/pixelHeight:/ {print $2}')" = "1024"
 test "$(sips -g pixelWidth "$SOURCE_ROOT/Resources/GitHubPreview.png" | awk '/pixelWidth:/ {print $2}')" = "1200"
 test "$(sips -g pixelHeight "$SOURCE_ROOT/Resources/GitHubPreview.png" | awk '/pixelHeight:/ {print $2}')" = "630"
+swift Tests/BrandPaletteTests.swift Resources/AppIcon.png Resources/GitHubPreview.png
 
 printf '%s\n' 'Brand assets are packaged at the expected sizes.'

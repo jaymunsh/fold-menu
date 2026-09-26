@@ -1,11 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <title>Fold Menu</title>
-  <rect width="1024" height="1024" rx="214" fill="#E1F2E8"/>
-  <g transform="translate(0 1024) scale(1 -1)" fill="none" stroke="#1C2924" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">
+  <rect width="1024" height="1024" rx="214" fill="#FFFFFF"/>
+  <g transform="translate(0 1024) scale(1 -1)" fill="none" stroke="#242424" stroke-width="23" stroke-linecap="round" stroke-linejoin="round">
     <path d="M161 724 V788 C161 808 176 823 196 823 H379 L424 763"/>
     <rect x="161" y="266" width="702" height="496" rx="66"/>
   </g>
-  <g fill="#1C2924">
+  <g fill="#666666">
     <circle cx="442" cy="519" r="18"/>
     <circle cx="512" cy="519" r="18"/>
     <circle cx="582" cy="519" r="18"/>

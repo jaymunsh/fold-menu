@@ -72,21 +72,21 @@ process.waitUntilExit()
 guard process.terminationStatus == 0 else { fatalError("iconutil failed") }
 
 let preview = png(width: 1200, height: 630) {
-    color(0xF8FBF9).setFill()
+    color(0xFFFFFF).setFill()
     NSRect(x: 0, y: 0, width: 1200, height: 630).fill()
-    color(0xE1F2E8).setFill()
+    color(0xF3F3F3).setFill()
     NSRect(x: 0, y: 546, width: 1200, height: 84).fill()
-    color(0xBCD9C8).setFill()
+    color(0xDEDEDE).setFill()
     NSRect(x: 0, y: 545, width: 1200, height: 1).fill()
 
     // A quiet menu-bar motif, with the approved A icon as the hero.
     let miniFolder = NSBezierPath(roundedRect: NSRect(x: 58, y: 574, width: 34, height: 24), xRadius: 4, yRadius: 4)
     miniFolder.lineWidth = 2.5
-    color(0x1C2924).setStroke()
+    color(0x242424).setStroke()
     miniFolder.stroke()
-    drawText("Fold Menu", at: NSPoint(x: 107, y: 570), size: 25, weight: .semibold, ink: color(0x1C2924))
+    drawText("Fold Menu", at: NSPoint(x: 107, y: 570), size: 25, weight: .semibold, ink: color(0x242424))
     for x: CGFloat in [1066, 1094, 1122] {
-        color(0x1C2924).setFill()
+        color(0x242424).setFill()
         NSBezierPath(ovalIn: NSRect(x: x, y: 582, width: 8, height: 8)).fill()
     }
 
@@ -99,9 +99,9 @@ let preview = png(width: 1200, height: 630) {
     icon.draw(in: NSRect(x: 92, y: 98, width: 388, height: 388))
     NSGraphicsContext.restoreGraphicsState()
 
-    drawText("Fold Menu", at: NSPoint(x: 536, y: 353), size: 76, weight: .bold, ink: color(0x1C2924))
-    drawText("메뉴바를 가볍게.", at: NSPoint(x: 540, y: 278), size: 34, weight: .medium, ink: color(0x34433C))
-    drawText("숨긴 상태 아이콘을 한 곳에서", at: NSPoint(x: 541, y: 225), size: 24, weight: .regular, ink: color(0x66776D))
+    drawText("Fold Menu", at: NSPoint(x: 536, y: 353), size: 76, weight: .bold, ink: color(0x242424))
+    drawText("메뉴바를 가볍게.", at: NSPoint(x: 540, y: 278), size: 34, weight: .medium, ink: color(0x4A4A4A))
+    drawText("숨긴 상태 아이콘을 한 곳에서", at: NSPoint(x: 541, y: 225), size: 24, weight: .regular, ink: color(0x777777))
 }
 try preview.write(to: resources.appendingPathComponent("GitHubPreview.png"))
 print("Generated AppIcon.png, AppIcon.icns, and GitHubPreview.png from AppIcon.svg")
