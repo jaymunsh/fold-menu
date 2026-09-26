@@ -1,0 +1,11 @@
+[req]
+prompt = no
+distinguished_name = identity
+x509_extensions = signing
+[identity]
+CN = Fold Menu Local Development
+[signing]
+basicConstraints = critical,CA:false
+keyUsage = critical,digitalSignature
+extendedKeyUsage = critical,codeSigning
+subjectKeyIdentifier = hash
