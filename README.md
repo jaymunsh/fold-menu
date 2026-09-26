@@ -4,11 +4,13 @@
 
 macOS 메뉴바 항목을 한 폴더에서 펼쳐 쓰는 네이티브 프로토타입입니다.
 
-## 다운로드·실행
+## 개발자 설치
 
-[소스 ZIP 다운로드](https://github.com/jaymunsh/fold-menu/archive/refs/heads/main.zip) 또는 저장소 복제 후, macOS 14 이상에서 Xcode Command Line Tools를 준비해 빌드하세요. 현재 공개 배포용 공증 앱은 제공하지 않습니다.
+macOS 14 이상과 Xcode Command Line Tools가 필요합니다. 설치용 앱 ZIP이나 GitHub Release는 제공하지 않으며, 저장소를 복제해 직접 빌드합니다.
 
 ```sh
+git clone https://github.com/jaymunsh/fold-menu.git
+cd fold-menu
 bash scripts/build.sh
 open "dist/Fold Menu.app"
 ```
