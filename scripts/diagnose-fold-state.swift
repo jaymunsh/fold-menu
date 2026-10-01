@@ -86,3 +86,15 @@ for window in windowInfo where window[kCGWindowLayer as String] as? Int == 25 {
           rect.width > 1000 || pid.int32Value == NSRunningApplication.current.processIdentifier else { continue }
     print("statusHost window=\(number.uint32Value) owner=\(owner) pid=\(pid.int32Value) onscreen=\(window[kCGWindowIsOnscreen as String] ?? "?") frame=\(rect)")
 }
+
+// Normal app runs retain only their most recent failed menu operation.
+// This is a read-only summary; it does not trigger a click or reset the log.
+if let file = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+    .appendingPathComponent("dev.leneu.foldmenu/last-menu-failure.json"),
+   let data = try? Data(contentsOf: file),
+   let report = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
+    print("lastMenuFailure item=\(report["itemID"] ?? "unknown") recordedAt=\(report["recordedAt"] ?? "unknown")")
+    for event in (report["events"] as? [[String: Any]] ?? []).suffix(12) {
+        print("failureStage \(event["stage"] ?? "unknown") elapsed=\(event["elapsed"] ?? "unknown") \(event["detail"] ?? "")")
+    }
+}

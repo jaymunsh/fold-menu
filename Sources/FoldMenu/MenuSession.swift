@@ -28,11 +28,14 @@ enum MenuSession {
         try Task.checkCancellation()
         switch NativeMenuPress.press(item.element) {
         case .requested:
+            menuOperationDiagnostics.record("menu.press", detail: "AXPress requested")
             trace("native press requested \(item.id)")
         case .unsupported:
+            menuOperationDiagnostics.record("menu.press", detail: "AXPress unsupported; pointer fallback")
             trace("native press unsupported; pointer fallback \(item.id)")
             try await MenuTransport.click(at: CGPoint(x: rect.midX, y: rect.midY), host: host)
         case .failed(let error):
+            menuOperationDiagnostics.record("menu.pressFailed", detail: "AXError=\(error.rawValue)")
             throw PlacementError("\(item.name)의 메뉴 열기 요청에 실패했습니다 (\(error.rawValue)).")
         }
         var tracker = MenuSessionPolicy()
@@ -40,8 +43,14 @@ enum MenuSession {
             try await Task.sleep(for: .milliseconds(200))
             let menus = windows(for: owners).subtracting(baseline)
             let firstOpen = !tracker.appeared && !menus.isEmpty
-            if tracker.observe(hasPopup: !menus.isEmpty) { trace("menu dismissed \(item.id)"); return }
-            if firstOpen { trace("menu observed \(item.id) windows=\(menus)"); onOpen() }
+            if tracker.observe(hasPopup: !menus.isEmpty) {
+                menuOperationDiagnostics.record("menu.dismissed")
+                trace("menu dismissed \(item.id)"); return
+            }
+            if firstOpen {
+                menuOperationDiagnostics.record("menu.opened", detail: "windows=\(menus)")
+                trace("menu observed \(item.id) windows=\(menus)"); onOpen()
+            }
             if !tracker.appeared && attempt >= 4 && !wasFrontmost,
                NSWorkspace.shared.frontmostApplication?.processIdentifier == ownerPID {
                 trace("application activated \(item.id)")

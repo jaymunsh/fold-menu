@@ -1,42 +1,14 @@
 import AppKit
 
 enum MenuTransport {
-    struct Host {
-        let pid: pid_t
-        let window: CGWindowID
-        let visible: Bool
-        let frame: CGRect
-    }
+    typealias Host = MenuWindowSnapshot.Host
 
     static func host(at point: CGPoint) -> Host? {
-        let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
-        var matches: [Host] = []
-        for entry in windows {
-            guard entry[kCGWindowLayer as String] as? Int == 25,
-                  let bounds = entry[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  frame.height < 80, frame.contains(point),
-                  let pid = entry[kCGWindowOwnerPID as String] as? NSNumber,
-                  pid.int32Value != ProcessInfo.processInfo.processIdentifier,
-                  let window = entry[kCGWindowNumber as String] as? NSNumber else { continue }
-            matches.append(Host(pid: pid.int32Value, window: window.uint32Value,
-                        visible: entry[kCGWindowIsOnscreen as String] as? Bool ?? false, frame: frame))
-        }
-        // Prefer the smallest containing status window when menu items overlap.
-        return matches.min { $0.frame.width * $0.frame.height < $1.frame.width * $1.frame.height }
+        MenuWindowSnapshot().host(at: point)
     }
 
     static func host(windowID: CGWindowID) -> Host? {
-        // optionIncludingWindow returns no entry for off-screen hosted status
-        // windows on macOS 26. The complete list includes their real bounds.
-        let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
-        guard let entry = windows.first(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID }),
-              let bounds = entry[kCGWindowBounds as String] as? [String: Any],
-              let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-              let pid = entry[kCGWindowOwnerPID as String] as? NSNumber,
-              let window = entry[kCGWindowNumber as String] as? NSNumber else { return nil }
-        return Host(pid: pid.int32Value, window: window.uint32Value,
-                    visible: entry[kCGWindowIsOnscreen as String] as? Bool ?? false, frame: frame)
+        MenuWindowSnapshot().host(windowID: windowID)
     }
 
     enum MoveExpectation {
@@ -45,17 +17,7 @@ enum MenuTransport {
     }
 
     static func statusHosts() -> [Host] {
-        let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
-        return windows.compactMap { entry -> Host? in
-            guard entry[kCGWindowLayer as String] as? Int == 25,
-                  let pid = entry[kCGWindowOwnerPID as String] as? NSNumber,
-                  let bounds = entry[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  frame.width > 0, frame.height > 0, frame.height <= 50,
-                  let number = entry[kCGWindowNumber as String] as? NSNumber else { return nil }
-            return Host(pid: pid.int32Value, window: number.uint32Value,
-                        visible: entry[kCGWindowIsOnscreen as String] as? Bool ?? false, frame: frame)
-        }
+        MenuWindowSnapshot().statusHosts()
     }
 
     @MainActor static func move(_ item: MenuItem, leftOf target: Host, expecting expectation: MoveExpectation, afterTarget: Bool = false) async throws {
@@ -96,6 +58,7 @@ enum MenuTransport {
         let down = try event(.leftMouseDown, host: source, flags: .maskCommand)
         let up = try event(.leftMouseUp, host: liveTarget, flags: [])
         trace("move begin \(item.id) source=\(source.window) target=\(liveTarget.window) point=\(point)")
+        menuOperationDiagnostics.record("move.begin", detail: "source=\(source.window):\(source.frame) target=\(liveTarget.window):\(liveTarget.frame) ax=\(initialFrame) point=\(point)")
         // A cancelled task must never leave Command-mouse-down held.
         var released = false
         defer {
@@ -111,13 +74,15 @@ enum MenuTransport {
         var beganMoving = false
         for _ in 0..<30 {
             try await Task.sleep(for: .milliseconds(10))
-            if let moved = host(windowID: source.window), moved.frame.origin != source.frame.origin {
-                trace("move press source=\(moved.frame) target=\(String(describing: host(windowID: liveTarget.window)?.frame))")
+            let snapshot = MenuWindowSnapshot()
+            if let moved = snapshot.host(windowID: source.window), moved.frame.origin != source.frame.origin {
+                trace("move press source=\(moved.frame) target=\(String(describing: snapshot.host(windowID: liveTarget.window)?.frame))")
                 beganMoving = true
                 break
             }
         }
         trace("move press applied=\(beganMoving)")
+        menuOperationDiagnostics.record("move.pressApplied", detail: "applied=\(beganMoving)")
         try await MenuEventDelivery(event: up, pid: source.pid).send()
         released = true
         try await Task.sleep(nanoseconds: 15_000_000)
@@ -129,46 +94,46 @@ enum MenuTransport {
         let settlingDeadline = ProcessInfo.processInfo.systemUptime + 1.5
         while ProcessInfo.processInfo.systemUptime < settlingDeadline {
             try await Task.sleep(for: .milliseconds(20))
-            guard let current = menuElementFrame(item.element),
-                  let liveWindow = host(windowID: source.window) else {
+            guard let current = menuElementFrame(item.element) else {
                 _ = settling.observe(element: nil, window: nil, matchesDestination: false)
                 continue
             }
+            let snapshot = MenuWindowSnapshot()
+            guard let liveWindow = snapshot.host(windowID: source.window) else {
+                _ = settling.observe(element: nil, window: nil, matchesDestination: false)
+                continue
+            }
+            let displays = activeDisplayBounds()
             let matched = switch expectation {
             case .visibleBeside(let boundary):
-                isInMenuBarStrip(current) && liveWindow.visible && isInMenuBarStrip(liveWindow.frame)
-                    && host(windowID: boundary.window).map {
+                MenuBarGeometry.contains(current, displays: displays) && liveWindow.visible
+                    && MenuBarGeometry.contains(liveWindow.frame, displays: displays)
+                    && snapshot.host(windowID: boundary.window).map {
                         $0.pid == boundary.pid && MenuBarGeometry.isImmediatelyRight(liveWindow.frame, of: $0.frame)
                     } == true
             // WindowServer may keep kCGWindowIsOnscreen=true for an ordered
             // hosted window whose entire frame is outside every display.
             // Verify both independent geometries instead of that stale flag.
-            case .hidden: MenuBarGeometry.isParkedOffscreen(current, displays: activeDisplayBounds())
-                && MenuBarGeometry.isParkedOffscreen(liveWindow.frame, displays: activeDisplayBounds())
+            case .hidden: MenuBarGeometry.isParkedOffscreen(current, displays: displays)
+                && MenuBarGeometry.isParkedOffscreen(liveWindow.frame, displays: displays)
             }
             if settling.observe(element: current, window: liveWindow.frame,
                                 matchesDestination: matched && current.origin != initialFrame.origin) {
                 trace("move verified \(item.id) \(current) host=\(liveWindow.frame)")
+                menuOperationDiagnostics.record("move.verified", detail: "ax=\(current) host=\(liveWindow.frame)")
                 return
             }
         }
-        trace("move unverified source=\(String(describing: host(windowID: source.window)?.frame)) target=\(String(describing: host(windowID: liveTarget.window)?.frame)) ax=\(String(describing: menuElementFrame(item.element)))")
+        let snapshot = MenuWindowSnapshot()
+        let finalElement = menuElementFrame(item.element)
+        let failureGeometry = "source=\(String(describing: snapshot.host(windowID: source.window)?.frame)) target=\(String(describing: snapshot.host(windowID: liveTarget.window)?.frame)) ax=\(String(describing: finalElement))"
+        menuOperationDiagnostics.record("move.unverified", detail: failureGeometry)
+        trace("move unverified \(failureGeometry)")
         throw PlacementError("아이콘 이동 결과를 확인하지 못했어요. 추가 이동은 중단했습니다.")
     }
 
     static func statusWindowFingerprint() -> Set<String> {
-        let windows = CGWindowListCopyWindowInfo(.optionAll, kCGNullWindowID) as? [[String: Any]] ?? []
-        let layer = Int(CGWindowLevelForKey(.statusWindow))
-        return Set(windows.compactMap { entry in
-            guard entry[kCGWindowLayer as String] as? Int == layer,
-                  let number = entry[kCGWindowNumber as String] as? NSNumber,
-                  let bounds = entry[kCGWindowBounds as String] as? [String: Any],
-                  let frame = CGRect(dictionaryRepresentation: bounds as CFDictionary),
-                  frame.width > 0,
-                  frame.origin.x.isFinite, frame.origin.y.isFinite,
-                  frame.width.isFinite, frame.height.isFinite else { return nil }
-            return StatusWindowFingerprint.key(windowID: number.uint32Value, frame: frame)
-        })
+        MenuWindowSnapshot().statusWindowFingerprint()
     }
 
     @MainActor static func click(at point: CGPoint, host: Host) async throws {

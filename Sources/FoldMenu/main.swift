@@ -4,6 +4,8 @@ import CoreGraphics
 import SwiftUI
 import Combine
 
+@MainActor let menuOperationDiagnostics = MenuOperationDiagnostics()
+
 func trace(_ message: String) {
     guard CommandLine.arguments.contains("--trace") else { return }
     FileHandle.standardError.write(Data("\(Date()) \(message)\n".utf8))
@@ -72,7 +74,9 @@ final class MenuStore: ObservableObject {
     @Published var items: [MenuItem] = []
     @Published var trusted = AXIsProcessTrusted()
     @Published var message = ""
-    @Published var scanning = false
+    // Scan coordination is not UI state. Publishing it invalidated both
+    // hosting views at scan start/end even when their content was unchanged.
+    var scanning = false
     @Published var arranging = false
     @Published var activity = ""
     @Published var borrowedCount = 0
@@ -82,12 +86,14 @@ final class MenuStore: ObservableObject {
     private var refreshWaiters: [() -> Void] = []
     private var scanApplications: [NSRunningApplication] = []
     private var scanResults: [MenuItem] = []
+    private var scanIcons: MenuIconIndex?
     var selected: [MenuItem] {
         items.filter { folderIDs.contains($0.id) }.sorted { $0.frame.minX < $1.frame.minX }
     }
 
     func captureFolderItems(leftOf folderX: CGFloat) {
-        let visible = items.filter { isInMenuBarStrip($0.frame) }
+        let displays = activeDisplayBounds()
+        let visible = items.filter { MenuBarGeometry.contains($0.frame, displays: displays) }
         folderIDs = Set(visible.filter { $0.frame.midX < folderX }.map(\.id))
         UserDefaults.standard.set(Array(folderIDs), forKey: "folderIDs.v2")
         UserDefaults.standard.set(true, forKey: "layout.v2.completed")
@@ -110,7 +116,8 @@ final class MenuStore: ObservableObject {
     }
 
     func refresh(completion: (() -> Void)? = nil) {
-        trusted = AXIsProcessTrusted()
+        let currentTrust = AXIsProcessTrusted()
+        if trusted != currentTrust { trusted = currentTrust }
         if let completion { refreshWaiters.append(completion) }
         guard trusted, !arranging else {
             let waiters = refreshWaiters
@@ -133,6 +140,7 @@ final class MenuStore: ObservableObject {
         }
         scanApplications = applications
         scanResults = []
+        scanIcons = MenuIconIndex(items.map { ($0.id, $0.icon) })
         scanNextApplication(at: 0)
     }
 
@@ -141,6 +149,7 @@ final class MenuStore: ObservableObject {
             items = scanResults.sorted { $0.frame.minX < $1.frame.minX }
             scanApplications = []
             scanResults = []
+            scanIcons = nil
             scanning = false
             let waiters = refreshWaiters
             refreshWaiters.removeAll()
@@ -149,20 +158,30 @@ final class MenuStore: ObservableObject {
         }
 
         let app = scanApplications[index]
+        let appScanStarted = ProcessInfo.processInfo.systemUptime
+        defer {
+            let elapsed = ProcessInfo.processInfo.systemUptime - appScanStarted
+            if elapsed >= 0.1 {
+                menuOperationDiagnostics.record("scan.slowApp", detail: "owner=\(app.bundleIdentifier ?? "unknown") seconds=\(elapsed)")
+            }
+        }
         let root = AXUIElementCreateApplication(app.processIdentifier)
         AXUIElementSetMessagingTimeout(root, 0.5)
         if let value = attribute(root, kAXExtrasMenuBarAttribute),
            CFGetTypeID(value) == AXUIElementGetTypeID() {
             let children = attribute(value as! AXUIElement, kAXChildrenAttribute) as? [AXUIElement] ?? []
+            // One synchronous application pass only. Re-read after yielding
+            // to the next application, never retain geometry across scans.
+            let displays = activeDisplayBounds()
             for (childIndex, child) in children.enumerated() {
                 guard let frame = menuElementFrame(child),
-                      MenuBarGeometry.isInMenuBarLane(frame, displays: activeDisplayBounds()) else { continue }
+                      MenuBarGeometry.isInMenuBarLane(frame, displays: displays) else { continue }
                 let owner = app.bundleIdentifier ?? app.executableURL?.path ?? String(app.processIdentifier)
                 let id = "\(owner):\(childIndex)"
                 let title = (attribute(child, kAXTitleAttribute) as? String).flatMap { $0.isEmpty ? nil : $0 }
                     ?? (attribute(child, kAXDescriptionAttribute) as? String).flatMap { $0.isEmpty ? nil : $0 }
                     ?? app.localizedName ?? "Menu item"
-                let icon = items.first(where: { $0.id == id })?.icon
+                let icon = scanIcons?.icon(for: id)
                     ?? capturedStatusIcon(at: CGPoint(x: frame.midX, y: frame.midY))
                     ?? app.icon ?? NSImage(systemSymbolName: "app", accessibilityDescription: nil)!
                 scanResults.append(MenuItem(id: id, name: title, icon: icon, element: child, frame: frame))
@@ -258,22 +277,21 @@ struct SettingsView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack {
-                Text("Fold Menu 설정").font(.headline)
+                Button(store.layoutEditing ? "편집 완료하고 접기" : "항목 편집 시작") {
+                    if store.layoutEditing { finishEditing() } else { beginEditing() }
+                }
                 Spacer()
-                Text("\(store.selected.count)개").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                Text("폴더 항목 \(store.selected.count)개")
+                    .font(.caption.monospacedDigit()).foregroundStyle(.secondary)
             }
-            GroupBox("폴더 항목 편집") {
-                VStack(alignment: .leading, spacing: 10) {
-                    if store.layoutEditing {
-                        Text("⌘ 키를 누른 채 메뉴바 안에서 좌우로만 옮기세요.\n폴더 왼쪽은 폴더 안, 오른쪽은 항상 표시입니다.")
-                        Text("메뉴바 아래로 놓으면 macOS가 항목을 제거합니다.")
-                            .foregroundStyle(.red).font(.caption)
-                        Button("편집 완료하고 접기", action: finishEditing)
-                    } else {
-                        Text("아이콘을 넣거나 뺄 때만 숨긴 항목을 펼칩니다.")
-                        Button("항목 편집 시작", action: beginEditing)
-                    }
-                }.frame(maxWidth: .infinity, alignment: .leading)
+            if store.layoutEditing {
+                Text("⌘ 키를 누른 채 메뉴바 안에서 좌우로만 옮기세요.\n폴더 왼쪽은 폴더 안, 오른쪽은 항상 표시입니다.")
+                    .font(.callout)
+                Text("메뉴바 아래로 놓으면 macOS가 항목을 제거합니다.")
+                    .foregroundStyle(.red).font(.caption)
+            } else {
+                Text("아이콘을 넣거나 뺄 때만 숨긴 항목을 펼칩니다.")
+                    .font(.callout).foregroundStyle(.secondary)
             }
             if !store.trusted { Button("손쉬운 사용 허용") { store.requestAccessibility() } }
             if !CGPreflightScreenCaptureAccess() {
@@ -296,7 +314,7 @@ struct SettingsView: View {
             }
         }
         .padding(16)
-        .frame(width: 380)
+        .frame(width: 360)
         .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -835,6 +853,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
     private func activate(_ item: MenuItem) {
         trace("activate \(item.id) busy=\(store.arranging)")
         guard !store.arranging else { return }
+        menuOperationDiagnostics.begin(itemID: item.id)
+        menuOperationDiagnostics.record("activate.request", detail: "scanning=\(store.scanning) collapsed=\(store.collapsed)")
         panel.orderOut(nil)
         store.arranging = true
         store.message = ""
@@ -845,25 +865,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                 self.store.arranging = false
                 self.store.activity = ""
                 self.menuTask = nil
+                menuOperationDiagnostics.finish()
             }
             var returnMoveStarted = false
+            var phase = "prepare"
             do {
                 try await self.ensureFolderCollapsedForOperation()
+                phase = "anchors"
                 let returnAnchor = try self.borrowedAnchors[item.id] ?? self.temporaryReturnAnchor(for: item)
                 self.borrowedAnchors[item.id] = returnAnchor
                 if let frame = menuElementFrame(item.element), !isInMenuBarStrip(frame) {
+                    phase = "extract"
                     let visibleAnchor = try self.temporaryVisibleAnchor(excluding: item)
                     try await MenuTransport.move(item, leftOf: visibleAnchor.neighbor,
                                                  expecting: .visibleBeside(visibleAnchor.boundary))
                 }
+                phase = "menu"
                 try await MenuSession.pressAndWait(item) {
                     self.store.activity = "\(item.name) 메뉴 사용 중"
                 }
                 self.store.activity = "폴더로 되돌리는 중…"
                 returnMoveStarted = true
+                phase = "return"
                 try await self.returnBorrowedItem(itemID: item.id)
                 self.store.message = ""
             } catch {
+                menuOperationDiagnostics.record("activate.failedPhase", detail: "phase=\(phase) borrowed=\(self.borrowedAnchors.count)")
                 if !returnMoveStarted, self.borrowedAnchors[item.id] != nil {
                     do {
                         try await self.returnBorrowedItem(itemID: item.id)
@@ -872,6 +899,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
                     }
                 }
                 trace("activation error \(error)")
+                let failureFile = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first?
+                    .appendingPathComponent("dev.leneu.foldmenu/last-menu-failure.json")
+                if let failureFile {
+                    // Diagnostic I/O must never replace the original error or
+                    // interfere with returning an extracted status item.
+                    try? menuOperationDiagnostics.saveFailure(error, to: failureFile)
+                }
                 self.store.message = error is CancellationError
                     ? "대기를 취소했습니다. 꺼낸 항목은 다시 누르면 사용할 수 있습니다."
                     : "\(error.localizedDescription) 꺼낸 항목이 있다면 다시 눌러 사용할 수 있습니다."
@@ -1249,7 +1283,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         }
         let displays = mirrorDisplays()
         removeDisconnectedFolderOverlays(activeDisplayIDs: Set(displays.map(\.id)))
-        let hosts = MenuTransport.statusHosts().filter { !folderMirrorWindowIDs.contains($0.window) }
+        let mirrorWindowIDs = folderMirrorWindowIDs
+        let hosts = MenuTransport.statusHosts().filter { !mirrorWindowIDs.contains($0.window) }
         let host = boundaryHost(in: hosts)
         guard let host else {
             hideFolderOverlays()
@@ -1293,7 +1328,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate {
         anchorTracking.found()
 
         let activeIDs = Set(frames.keys)
-        removeDisconnectedFolderOverlays(activeDisplayIDs: Set(displays.map(\.id)))
         let unmappedIDs = folderOverlays.keys.filter { !activeIDs.contains($0) }
         for displayID in unmappedIDs {
             folderOverlays[displayID]?.panel.orderOut(nil)

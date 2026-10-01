@@ -82,7 +82,15 @@ defer {
 }
 let openingPoint = measureCursor ? CGPoint(x: 900, y: 500) : original ?? .zero
 if measureCursor { CGWarpMouseCursorPosition(openingPoint) }
-if find(itemName) == nil { press("Fold Menu"); pause(0.05) }
+if find(itemName) == nil {
+    press("Fold Menu")
+    // AXPress can return before SwiftUI exposes the panel's item buttons.
+    // Wait for the requested control rather than assuming a 50ms render.
+    let deadline = ProcessInfo.processInfo.systemUptime + 3
+    while find(itemName) == nil && ProcessInfo.processInfo.systemUptime < deadline {
+        pause(0.05)
+    }
+}
 press(itemName)
 var expectedOpening = openingPoint
 if injectMovement {

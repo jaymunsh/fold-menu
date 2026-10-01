@@ -1,6 +1,10 @@
 # Fold Menu: 설계·구현·문제 해결 기록
 
-기록 기준: 2026-09-25. 이 문서는 초기 요구부터 현재 구현까지의 **의사결정과 기술적 이유**를 한곳에서 읽기 위한 요약이다. 실행별 좌표·창 번호·로그와 검증 범위는 [검증 기록](verification.md)과 [멀티모니터 실측](evidence/multi-monitor-2026-09-23.md)에 남긴다. 여기서 “구현”은 코드에 존재한다는 뜻이고, “실기 확인”은 명시된 OS·장치·앱에서 관찰했다는 뜻이다. 둘을 혼동하지 않는다.
+기록 기준: 2026-10-01. 이 문서는 초기 요구부터 현재 구현까지의 **의사결정과 기술적 이유**를 한곳에서 읽기 위한 요약이다. 실행별 좌표·창 번호·로그와 검증 범위는 [검증 기록](verification.md)과 [멀티모니터 실측](evidence/multi-monitor-2026-09-23.md)에 남긴다. 여기서 “구현”은 코드에 존재한다는 뜻이고, “실기 확인”은 명시된 OS·장치·앱에서 관찰했다는 뜻이다. 둘을 혼동하지 않는다.
+
+동작·화면 실측은 주로 9월 22~24일 기록이며, 9월 25일 확인한 미해결 사항과 9월 26일의 브랜드 자산·GitHub 공개 작업을 함께 정리했다. 9월 28일 갱신은 블로그 참고용 문서 보완이다. 앱 동작을 수정하거나 잠금·절전·macOS 27 실기 검증을 새로 완료한 작업이 아니다.
+
+10월 1일에는 기존 주기·이동 판정·복구 정책을 유지하면서 조회 중복을 줄였다. 자동 검사와 단일 화면의 재실행·접힘 상태 및 donts3p 메뉴 열기·복귀를 추가 확인했다. 잠금·절전 반복, 보조 화면 포커스와 macOS 27의 검증 범위는 확대하지 않았다.
 
 ## 1. 출발점과 목표
 
@@ -27,7 +31,10 @@
 | 2026-09-22 | 원본 메뉴 임시 꺼내기/복귀 검증, 커서 보호·`AXPress`, 숫자 폴더 아이콘, 설정·앵커 조정 |
 | 2026-09-23 | 잠금 복귀 안전장치, 화면별 폴더 오버레이, 비활성 색·수직 정렬 |
 | 2026-09-24 | 상태창 변화 기반 검색 비용 조정, 두 화면·기존 선택 상태 재확인 |
-| 2026-09-25 현재 | 보조 화면에서 포커스와 실제 메뉴 화면이 일치하지 않는 문제를 미해결로 확인 |
+| 2026-09-25 | 보조 화면에서 포커스와 실제 메뉴 화면이 일치하지 않는 문제를 미해결로 확인 |
+| 2026-09-26 | 앱·GitHub 대표 이미지 제작, 공개 저장소와 개발자 직접 빌드 방식 정리, 민트 계열 시안을 무채색으로 변경 |
+| 2026-09-28 | 최신 공개·브랜딩 기록 및 블로그용 근거·표현 기준 보완. 동작 검증 범위는 확대하지 않음 |
+| 2026-10-01 | 이동 확인 회차 내 조회 공유, 검색용 아이콘 인덱스·중복 변경 발행 축소, 설정 간소화, 제한된 로컬 실패 진단 추가. 전후 유휴 CPU·메모리 실측과 편집·접기 회귀, 메뉴 반복 검사 성공·간헐 실패를 함께 기록 |
 
 ## 2. 설계가 바뀐 이유
 
@@ -78,13 +85,15 @@
 | 책임 | 주요 파일 | 동작 |
 | --- | --- | --- |
 | 앱·UI·상태 조정 | [`main.swift`](../Sources/FoldMenu/main.swift) | 단일 `NSStatusItem`, SwiftUI 폴더·설정, 편집/접기, 화면별 오버레이, 주기적 검색, 복구 연결 |
-| 항목 검색 | `main.swift`의 `MenuStore`, [`MenuElement.swift`](../Sources/FoldMenu/MenuElement.swift) | 실행 중 앱의 `kAXExtrasMenuBarAttribute` 자식과 위치를 읽고 `bundleID:childIndex` 형태 ID 사용 |
-| 실제 상태창 조회·이동 | [`MenuTransport.swift`](../Sources/FoldMenu/MenuTransport.swift), [`MenuEventDelivery.swift`](../Sources/FoldMenu/MenuEventDelivery.swift) | WindowServer 상태창의 PID·창 ID·프레임 조회, 제한된 `⌘` 입력 전달, 이동 결과 검증 |
+| 항목 검색 | `main.swift`의 `MenuStore`, [`MenuElement.swift`](../Sources/FoldMenu/MenuElement.swift), [`MenuIconIndex.swift`](../Sources/FoldMenu/MenuIconIndex.swift) | 실행 중 앱의 AX 자식·좌표를 새로 읽고, 검색 회차 안에서 아이콘만 ID로 재사용 |
+| 실제 상태창 조회·이동 | [`MenuTransport.swift`](../Sources/FoldMenu/MenuTransport.swift), [`MenuWindowSnapshot.swift`](../Sources/FoldMenu/MenuWindowSnapshot.swift), [`MenuEventDelivery.swift`](../Sources/FoldMenu/MenuEventDelivery.swift) | 확인 회차별 WindowServer 목록으로 PID·창 ID·프레임 조회, 제한된 `⌘` 입력 전달, 이동 결과 검증 |
 | 메뉴 세션 | [`MenuSession.swift`](../Sources/FoldMenu/MenuSession.swift), [`NativeMenuPress.swift`](../Sources/FoldMenu/NativeMenuPress.swift) | 가능하면 `AXPress`, 불가능하면 좌표 클릭; 실제 팝업 출현·종료 관찰 |
+| 실패 진단 | [`MenuOperationDiagnostics.swift`](../Sources/FoldMenu/MenuOperationDiagnostics.swift) | 메뉴 사용 단계·경과 시간을 제한된 메모리에 기록하고, 실패 때만 개인정보를 제외한 로컬 파일 하나로 저장 |
 | 포인터 보호 | [`CursorTransaction.swift`](../Sources/FoldMenu/CursorTransaction.swift), [`CursorMotion.swift`](../Sources/FoldMenu/CursorMotion.swift) | 짧은 자동 입력 동안 포인터를 보호하고 사용자의 물리적 이동량을 반영해 복원 |
 | 위치·복구 정책 | [`MenuBarGeometry.swift`](../Sources/FoldMenu/MenuBarGeometry.swift), [`FolderAnchorTracking.swift`](../Sources/FoldMenu/FolderAnchorTracking.swift), [`FoldRecoveryPolicy.swift`](../Sources/FoldMenu/FoldRecoveryPolicy.swift), [`ReturnPlacement.swift`](../Sources/FoldMenu/ReturnPlacement.swift) | 메뉴바 행/화면 밖 여부, 경계 창 추적, 잠금 복귀, 임시 항목 복귀 기준 |
 | 화면별 폴더 | [`MenuBarMirrorPlacement.swift`](../Sources/FoldMenu/MenuBarMirrorPlacement.swift) | 실제 예약 슬롯을 화면별 좌표로 변환하고 모호한 슬롯에는 오버레이를 두지 않음 |
 | 개수·검색 비용 | [`FolderIndicator.swift`](../Sources/FoldMenu/FolderIndicator.swift), [`DiscoveryScanPolicy.swift`](../Sources/FoldMenu/DiscoveryScanPolicy.swift) | 고정 크기 숫자 그림, 상태창 변화 기반 전체 접근성 검색 |
+| 앱·저장소 브랜드 자산 | [`AppIcon.svg`](../Resources/AppIcon.svg), [`generate-brand-assets.swift`](../scripts/generate-brand-assets.swift), [`build.sh`](../scripts/build.sh) | 벡터 원본에서 PNG·ICNS·README 대표 이미지 생성, 앱 번들에 ICNS 포함 후 서명 |
 
 프로젝트는 Swift Package의 macOS 실행 타깃으로 구성된다. `scripts/build.sh`가 release 바이너리를 `dist/Fold Menu.app`에 넣고 서명·검증한다. Package의 최소 타깃은 macOS 14지만, **실제 동작 검증은 주로 macOS 26.6.2**에서 이루어졌다. 최소 빌드 타깃과 기능 호환성은 다른 주장이다.
 
@@ -112,6 +121,12 @@ AppKit이 보고하는 상태 항목 프레임은 접힌 직후 예전 38pt 폭�
 
 변경 전 실측은 평상시 CPU 0~3%, 메모리 약 29MB, 진단용 전체 AX 검색 경과 시간 약 1.6초였다. 검색 정책 변경 후 **배터리 절감량을 따로 실측하지는 않았다**. 수치를 근거 없이 “최적화 완료”로 해석하지 않는다.
 
+2026-10-01 변경에서는 메뉴를 꺼낸 위치를 검증하는 한 회차의 원본·경계 창을 같은 `MenuWindowSnapshot`에서 찾는다. 기존 두 번의 전체 창 조회를 한 번으로 줄이고, AX 프레임과 실제 호스트의 화면 판정에도 같은 화면 목록을 사용한다. **다음 확인 회차에서는 다시 조회**하므로, 이동·잠금 복귀 동안 오래된 좌표를 재사용하는 전역 캐시는 아니다. 화면 추적에서도 오버레이 창 ID 집합을 한 번 만들고 중복된 연결 해제 정리를 제거했다. 250ms 추적, 5초 검색 타이머, 위치 안정화와 커서·복귀 안전장치는 유지한다.
+
+같은 날 설정의 중복 제목·편집 박스를 없애 정상 창 크기를 380×205pt에서 360×151pt로 줄였다. 단일 화면에서 항목 8개를 접은 전후 유휴 측정(각 30개 표본)은 평균 CPU 1.677% → 1.623%, 메모리 표시 20–21M으로 비슷했다. **유휴 상태의 의미 있는 절감 효과나 배터리 절감은 확인하지 못했다.** 조건·원본 CPU 표본·해석 한계는 [설정 간소화·성능 측정](evidence/settings-and-performance-2026-10-01.md)에 기록했다.
+
+후속 변경에서는 한 앱의 자식 검색 동안 화면 목록을 공유하고, 검색 시작 때 기존 아이콘의 ID 인덱스를 만든다. UI에서 쓰지 않는 검색 진행 플래그의 변경 발행과 동일한 접근성 권한 값의 재발행을 제거했다. 실제 AX 요소·좌표는 계속 새로 발행하며, 검색 결과가 비슷하다는 이유로 오래된 클릭 대상을 유지하지 않는다. PortManager가 추가된 9개 상태의 짧은 유휴 측정은 평균 CPU 1.717% → 1.483%, 메모리 표시 20–21M → 21M이었다. 확정 절감률이나 배터리 효과를 주장하지 않는다. 메뉴 사용 실패를 다음에 분석할 수 있도록 단계·경과 시간을 제한해 남기되, 오류 문구·AX 제목·실행 파일 경로는 저장하지 않는다. [검색 최적화·진단 기록](evidence/scan-optimization-and-diagnostics-2026-10-01.md)에 구현 범위와 측정 원본을 정리했다.
+
 ## 5. 주요 문제와 해결 내역
 
 | 관찰된 문제 | 원인·판단 근거 | 적용한 대응/현재 상태 |
@@ -133,11 +148,12 @@ AppKit이 보고하는 상태 항목 프레임은 접힌 직후 예전 38pt 폭�
 
 ## 6. 검증 방법과 확인된 범위
 
-자동 정책 검사는 `bash scripts/test.sh`, 릴리스 빌드·서명 검사는 `bash scripts/build.sh`로 실행한다. AX 검색과 메뉴바·화면별 실제 좌표는 `scripts/diagnose-fold-state.swift`, `scripts/verify-mirrors.swift` 등으로 **별도 관찰**했다. 테스트 도구의 `AXPress` 성공 응답만으로 실제 앱 메뉴가 열렸다고 인정하지 않고, 팝업 창과 복귀 위치를 함께 봤다. 메뉴 클릭을 시험할 때는 다른 앱의 메뉴 명령을 실행하지 않고 Escape로 닫았다.
+자동 정책 검사는 `bash scripts/test.sh`, 릴리스 빌드·서명 검사는 `bash scripts/build.sh`로 실행한다. 여기서 릴리스 빌드는 Swift의 최적화 빌드 설정이며, GitHub Release 게시를 뜻하지 않는다. 브랜드 자산·번들 포함 검사는 `bash scripts/verify-brand-assets.sh`가 임시 복사본에서 수행한다. AX 검색과 메뉴바·화면별 실제 좌표는 `scripts/diagnose-fold-state.swift`, `scripts/verify-mirrors.swift` 등으로 **별도 관찰**했다. 테스트 도구의 `AXPress` 성공 응답만으로 실제 앱 메뉴가 열렸다고 인정하지 않고, 팝업 창과 복귀 위치를 함께 봤다. 메뉴 클릭을 시험할 때는 다른 앱의 메뉴 명령을 실행하지 않고 Escape로 닫았다.
 
 - macOS 26.6.2에서 Docker Desktop, HoldImg, donts3p, Orca, 카카오톡의 원본 메뉴 열림·닫힘과 항목 복귀를 확인한 기록이 있다. 각 실행의 범위와 예외는 [검증 기록](verification.md)을 따른다.
 - 내장 화면과 외부 화면의 폴더 버튼 각 하나, 네이티브 상태 항목 하나, 패널의 화면 간 열기·이동·닫기 및 수직 정렬을 확인했다. [실측 기록](evidence/multi-monitor-2026-09-23.md)은 당시 창 좌표와 명령 출력을 보존한다.
 - 마지막 검색 비용 변경 후에는 선택 ID 6개 중 **그때 실행 중이던 5개**가 화면 밖에 있고, 미복귀 임시 항목이 없음을 확인했다. ‘선택 6개’와 ‘그 순간 표시되는 개수 5개’는 모순이 아니다. 종료된 앱 ID는 설정에 남아도 현재 개수에서 제외한다.
+- 2026-10-01 설정 간소화 후 8개 선택을 유지한 편집·접기/설정 재열기 각 3회와 60초 접힘 검사가 통과했다. donts3p 메뉴 검사에서는 이동 검증 실패 1회와 버튼을 누르지 못한 INCOMPLETE 1회도 있었으며, 이후 추적 모드의 4회가 성공했다. 간헐 실패 원인은 미확정이고 후속 성공이 실패 해결을 뜻하지 않는다.
 - 실제 잠금/절전의 장시간 반복, 물리적 모니터 분리·재연결, 노치·전체 화면 조합, macOS 27 및 모든 앱 버전의 동작까지 포괄한 검증은 없다.
 
 `scripts/verify-cursor.swift`와 일부 `--physical` 도구는 실제 포인터와 다른 앱 메뉴를 움직인다. 사용자가 작업 중인 화면에서 무작정 돌리지 않는다. 테스트 전에는 저장된 선택·미복귀 기록을 읽고, 후에는 실제 항목 위치와 `temporaryPlacements.v1`을 다시 확인한다.
@@ -148,7 +164,7 @@ AppKit이 보고하는 상태 항목 프레임은 접힌 직후 예전 38pt 폭�
 2. **macOS 27 호환성:** 핵심 재배치는 공개된 “다른 앱의 상태 항목을 폴더로 옮기는 API”가 아니라 WindowServer 상태창과 비공개 이벤트 필드에 의존한다. macOS 업데이트마다 실제 메뉴 열림·복귀·잠금 복귀를 확인해야 한다. `CGWindowListCreateImage`는 macOS 14부터 deprecated 경고가 있으며 ScreenCaptureKit 전환도 별도 검토 대상이다.
 3. **앱별 차이:** AX 메뉴바 자식을 노출하지 않는 앱은 목록에 나타나지 않을 수 있다. 일부 앱은 팝업 대신 자체 창을 열고, 상태 아이콘이 동적으로 추가·제거되며, 메뉴 사용 중 앱이 종료될 수도 있다. 모든 앱에 동일한 클릭/복귀를 보장하지 않는다.
 4. **시각적 정확도:** 접힌 동안 상태 그림을 실시간 스트리밍하지 않는다. 배지·측정값의 즉시 동기화가 필요하면 별도의 캡처/갱신 설계가 필요하다.
-5. **권한과 배포:** 로컬 개발 서명으로 재빌드 신원 문제를 줄였지만 배포용 서명·공증·업데이트·권한 재승인 경험은 별도 설계/검증 대상이다.
+5. **권한과 배포:** 공개 저장소에서 개발자가 직접 빌드하는 방식만 제공한다. 로컬 개발 서명으로 재빌드 신원 문제를 줄였지만 Developer ID 배포 서명·공증·자동 업데이트·권한 재승인 경험은 별도 설계/검증 대상이다. 설치용 앱 ZIP과 GitHub Release는 사용자 결정에 따라 제공하지 않는다.
 
 ## 8. 운영·유지보수 원칙
 
@@ -157,3 +173,66 @@ AppKit이 보고하는 상태 항목 프레임은 접힌 직후 예전 38pt 폭�
 - 테스트/문서에서는 “코드에 있음”, “단위 검사 통과”, “실기에서 확인”, “사용자 보고”, “추정 원인”을 분리해 쓴다.
 - 회귀 시에는 선택 ID와 미복귀 기록을 먼저 읽고, 재빌드 후 권한 신원이 유지되는지 확인한다. 테스트가 사용자의 실제 배치를 바꿨다면 확인 없이 성공으로 보고하지 않는다.
 - 세부 현상과 수정 당시의 좌표·로그는 이 요약을 반복 확장하기보다 [검증 기록](verification.md)에 추가하고, 이 문서의 현재 상태/미해결 목록만 갱신한다.
+
+## 9. 브랜드 자산과 소스 공개 — 2026-09-26
+
+### 메뉴바 아이콘과 앱 아이콘은 다른 자산
+
+메뉴바에서 매번 보이는 그림은 `FolderIndicator.swift`가 그리는 **숫자가 들어간 닫힌 폴더 템플릿 이미지**다. 반면 Finder·앱 번들 및 저장소 소개에 사용할 대표 이미지는 `Resources/AppIcon.svg`를 원본으로 만든다. 대표 아이콘을 바꿨다고 런타임 메뉴바 그림이나 접기·이동 로직을 바꾼 것은 아니다.
+
+후보 중 폴더 윤곽과 내부 점 세 개로 구성한 A안을 선택했다. 최초 민트 계열 배경에서 흰 배경으로 바꾼 뒤에도 윤곽에 녹색 기운이 남아, 최종적으로 배경 `#FFFFFF`, 윤곽 `#242424`, 내부 점 `#666666`의 무채색으로 정리했다. 대표 이미지의 점 세 개는 브랜드 표현이지 실제 접힌 항목 수가 아니다.
+
+| 자산/도구 | 역할 |
+| --- | --- |
+| [`Resources/AppIcon.svg`](../Resources/AppIcon.svg) | 수정 기준이 되는 벡터 원본 |
+| [`Resources/AppIcon.png`](../Resources/AppIcon.png) | 1024×1024 PNG |
+| [`Resources/AppIcon.icns`](../Resources/AppIcon.icns) | 여러 해상도를 담은 macOS 앱 아이콘 |
+| [`Resources/GitHubPreview.png`](../Resources/GitHubPreview.png) | README에 사용하는 1200×630 대표 이미지. 실제 앱 화면 캡처가 아님 |
+| [`scripts/generate-brand-assets.swift`](../scripts/generate-brand-assets.swift) | AppKit으로 원본을 렌더링하고 `iconutil`로 ICNS 생성 |
+| [`scripts/verify-brand-assets.sh`](../scripts/verify-brand-assets.sh) | 임시 프로젝트 빌드로 번들 아이콘·이미지 크기·무채색 검사 |
+| [`Tests/BrandPaletteTests.swift`](../Tests/BrandPaletteTests.swift) | 16px 간격으로 불투명 픽셀을 표본 검사해 녹색 등 색조 재유입 탐지 |
+
+`Info.plist`에 `CFBundleIconFile=AppIcon`을 선언하고 빌드 스크립트가 `Contents/Resources/AppIcon.icns`를 복사한 **다음** 앱을 서명한다. 처음에는 실행 앱을 건드리지 않는 임시 빌드만 검증했기 때문에, 저장소에 아이콘이 생겨도 이미 실행 중이던 앱에는 반영되지 않았다. 이후 정상 종료 → 로컬 번들 재빌드·서명 검증 → 재실행으로 현재 Mac의 번들에도 적용했다. Finder 등의 아이콘 캐시와 모든 UI 표면까지 검증했다는 뜻은 아니다.
+
+재생성은 저장소 루트에서 `swift scripts/generate-brand-assets.swift`, 검증은 `bash scripts/verify-brand-assets.sh`로 수행한다. 생성 명령은 추적 중인 이미지 파일을 덮어쓰지만, 검증 명령은 현재 `dist/Fold Menu.app`을 덮어쓰거나 실행 앱을 종료하지 않는다.
+
+### 공개 범위와 커밋 근거
+
+저장소는 [jaymunsh/fold-menu](https://github.com/jaymunsh/fold-menu)에 공개했고, 기본 브랜치는 `main`이다. 한국어 README에 복제·빌드·실행과 권한 안내를 넣었다. 별도 한국어판 README, CHANGELOG, 설치용 앱 ZIP, GitHub Release는 현재 제공하지 않는다. Developer ID 공증 앱 배포를 완료했다는 의미도 아니다.
+
+공개에서 제외한 경로는 `.build/`, `dist/`, `.local-signing/`, `.omo/`, `.DS_Store`다. 특히 고정 로컬 개발 서명용 개인 키·키체인은 커밋하지 않는다. 로컬 개발 인증서로 `codesign` 검증을 통과하는 것과 Apple의 배포용 서명·공증은 별개다.
+
+- [`b27f9f1`](https://github.com/jaymunsh/fold-menu/commit/b27f9f121c724e810efa473a25584a0f15357df8): 정리된 프로토타입·검증 문서·브랜드 자산의 첫 공개.
+- [`8112151`](https://github.com/jaymunsh/fold-menu/commit/811215122777008c96d3ea2d8491418010702172): 앱 ZIP 없이 개발자 직접 빌드하는 설치 정책 명시.
+- [`a91fe7a`](https://github.com/jaymunsh/fold-menu/commit/a91fe7a760be5fb4fd032690adae306bbb6c24ba): 무채색 자산과 색조 표본 검사 추가.
+
+초기 개발의 개별 실패·수정이 모두 별도 커밋으로 남은 것은 아니다. 공개 커밋을 초기 트러블슈팅 전체의 패치 이력으로 해석하지 않고, 당시 실측·관찰 기록과 구분한다.
+
+## 10. 블로그 작성용 읽는 순서와 표현 기준
+
+이 문서는 블로그 완성 원고가 아니라 **개발 회고의 원자료**다. 기술 설명과 실제 실패를 연결하려면 다음 순서로 읽는다.
+
+1. 이 문서의 1~2절: 원했던 경험, 체크 기반 접근의 문제, 사용자 직접 편집으로 바꾼 이유.
+2. 3~4절: 현재 흐름과 구조. 스냅샷 패널과 실제 메뉴바 항목을 혼동하지 않는 것이 핵심이다.
+3. 5절과 [검증 기록](verification.md): 증상 → 관찰 근거 → 변경 → 재검증 → 남은 한계 순서로 사례를 구성한다.
+4. [멀티모니터 실측](evidence/multi-monitor-2026-09-23.md): 실제 명령·좌표·창 수로 확인한 범위를 인용한다. 날짜별 검증은 그때의 조건에 한정한다.
+5. 7절과 9절: 미해결 사항, 브랜드 디자인, 공개·설치 범위를 결론에 반영한다.
+
+특히 다음 사례는 구체적인 근거가 있어 글의 중심 소재로 쓰기 좋다.
+
+- **체크 상태와 원본 위치의 불일치:** UI의 선택 상태를 실제 숨김 성공으로 취급했던 초기 접근을 설명한다. 최종 설계는 실제 수평 배치를 읽는다.
+- **1pt 차이로 ‘옆에 옆’에 꺼내진 항목:** 검증 기록의 「임시 아이콘이 폴더 한 칸 너머에 나오던 문제」에서 AX x=1249와 실제 호스트 x=1250, 잘못 고른 다음 슬롯 x=1304를 비교한다. 수정 근거는 [`MenuBarGeometry.swift`](../Sources/FoldMenu/MenuBarGeometry.swift)와 [좌표 회귀 검사](../Tests/FoldMenuTests/MenuBarGeometryTests.swift)에 있다.
+- **잠금 해제 중 안전 펼침의 오작동:** 창 재생성을 지속적인 경계 상실로 오인한 경로와 12초 유예를 설명한다. [`FoldRecoveryPolicy.swift`](../Sources/FoldMenu/FoldRecoveryPolicy.swift)와 [정책 검사](../Tests/FoldMenuTests/FoldRecoveryTests.swift)는 있으나 반복 실물 잠금 검증 완료는 아니다.
+- **화면별 30pt/39pt 메뉴바 높이:** 하나의 높이를 재사용해 내장 화면에서 y=9로 내려간 원인과 실제 슬롯 높이 적용을 설명한다. 보조 화면에서 원본 앱 메뉴가 열리는 문제까지 해결했다고 확장하지 않는다.
+- **색이 남은 흰색 아이콘:** 배경만 흰색으로 바꿔도 윤곽 RGB가 다르면 녹색 기운이 남는다. 벡터 팔레트 수정과 PNG 표본 검사로 대응했고, 앱 번들에 포함하는 작업도 별도로 필요했다.
+
+글로 옮길 때의 표현 기준은 다음과 같다.
+
+- “폴더 안에서 원본 메뉴를 실행한다”보다 **“스냅샷을 선택하면 원본 항목 하나를 잠시 꺼내 메뉴를 연다”**가 정확하다. 현재 방식을 다른 앱의 네이티브 메뉴를 패널에 직접 임베딩한 구현으로 쓰지 않는다.
+- HoldImg 사건은 관찰된 사고와 안전성 개선을 설명하되, 앱 파일 삭제·마지막 제거 이벤트·완전한 복원 절차를 확정한 것처럼 쓰지 않는다.
+- 권한 재요청의 서명 신원 변화는 원인 후보였다. 고정 로컬 서명이 모든 권한 문제를 없앴다고 쓰지 않는다.
+- 단위 검사 통과, 실제 팝업·복귀 확인, 사용자 보고, 추정 원인, 미검증을 구분한다. 11·12·13·14개 검사 그룹은 각 시점에 존재한 그룹 수다. 이를 합산한 단일 통과 건수로 제시하지 않는다.
+- 성능 수치는 해당 장치·측정 방식의 관찰값이다. 배터리 절감량, macOS 27 호환성, 반복 잠금 안정성, 보조 모니터 메뉴 포커스는 확인된 성과로 포함하지 않는다.
+- 대표 이미지는 디자인 자산, 좌표·시간·창 번호는 특정 실행의 기록이다. 블로그에 이미지를 복사할 때 저장소 자산을 사용하고 임시 붙여넣기 경로나 개인 키·키체인·개인 로컬 경로를 노출하지 않는다.
+
+권장 흐름은 **원했던 경험 → 실패한 접근 → 관찰로 좁힌 원인 → 설계를 바꾼 이유 → 확인한 결과 → 남은 한계**다. 다른 메뉴바 관리 앱의 구현이나 macOS API 전반의 한계까지 비교하려면 별도 1차 자료를 확인해야 한다. 이 프로젝트 기록만으로 특정 기능이 플랫폼상 절대 불가능하다고 단정하지 않는다.

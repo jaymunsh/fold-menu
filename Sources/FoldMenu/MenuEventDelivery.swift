@@ -48,14 +48,17 @@ final class MenuEventDelivery {
         }
         CGEvent.tapEnable(tap: tap, enable: true)
         trace("tap enabled=\(CGEvent.tapIsEnabled(tap: tap)) event=\(event.type.rawValue) token=\(token)")
+        menuOperationDiagnostics.record("event.send", detail: "type=\(event.type.rawValue) pid=\(pid) window=\(event.getIntegerValueField(.mouseEventWindowUnderMousePointer))")
         event.post(tap: .cgSessionEventTap)
         for _ in 0..<50 {
             try await Task.sleep(for: .milliseconds(10))
             if received {
+                menuOperationDiagnostics.record("event.received", detail: "type=\(event.type.rawValue) mismatch=\(mismatch)")
                 if mismatch { throw PlacementError("macOS가 클릭을 다른 아이콘으로 전달하려 해 중단했습니다.") }
                 return
             }
         }
+        menuOperationDiagnostics.record("event.timeout", detail: "type=\(event.type.rawValue)")
         throw PlacementError("메뉴바 입력 응답을 확인하지 못했습니다.")
     }
 }
